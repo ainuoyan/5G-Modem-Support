@@ -1,4 +1,5 @@
 -- Exercise route registration without LuCI, a modem, or filesystem writes.
+-- Modified by ainuoyan, 2026-10-10: require POST for local archive deletion.
 local source = arg[1] or "luci-app-sms-tool/luasrc/controller/modem/sms.lua"
 
 for _, modem_installed in ipairs({ false, true }) do
@@ -26,7 +27,8 @@ for _, modem_installed in ipairs({ false, true }) do
         firstchild = function() return "firstchild" end,
         template = function(name) return name end,
         cbi = function(name) return name end,
-        call = function(name) return name end
+        call = function(name) return name end,
+        post = function(name) return "post:" .. name end
     }, { __index = _G })
     local controller = assert(loadfile(source))
     setfenv(controller, environment)
@@ -40,10 +42,13 @@ for _, modem_installed in ipairs({ false, true }) do
     end
     assert(routes["admin/network/modem/sms"].target == "admin/network/modem/sms/readsms")
     for _, name in ipairs({"readsms", "sendsms", "ussd", "atcommands", "smsconfig",
-            "delete_one", "delete_all", "run_ussd", "run_at", "run_sms", "readsim",
+            "get_inbox", "delete_saved", "run_ussd", "run_at", "run_sms", "readsim",
             "countsms", "user_ussd", "user_atc", "user_phonebook"}) do
         assert(routes["admin/network/modem/sms/" .. name], "Missing SMS route: " .. name)
     end
+    assert(routes["admin/network/modem/sms/delete_saved"].target == "post:delete_saved")
+    assert(routes["admin/network/modem/sms/delete_one"] == nil)
+    assert(routes["admin/network/modem/sms/delete_all"] == nil)
     assert(routes["admin/modem"] == nil, "Do not create a duplicate top-level menu")
 end
 

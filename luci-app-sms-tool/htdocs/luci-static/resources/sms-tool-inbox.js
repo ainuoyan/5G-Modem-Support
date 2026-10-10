@@ -10,7 +10,7 @@
                 result.push(Object.assign({}, message));
                 continue;
             }
-            const key = JSON.stringify([message.sender, message.reference, message.total]);
+            const key = JSON.stringify([message.scope, message.sender, message.reference, message.total]);
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(message);
         }
@@ -26,6 +26,7 @@
             const content = [];
             merged.index = ordered.map(segment => segment.index).join('-');
             merged.received_parts = ordered.length;
+            merged.released = ordered.every(segment => segment.released === true);
             merged.missing_parts = [];
             for (let part = 1; part <= merged.total; part++) {
                 if (parts.has(part)) content.push(parts.get(part).content);

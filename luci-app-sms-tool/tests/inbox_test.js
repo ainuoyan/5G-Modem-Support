@@ -21,4 +21,8 @@ result = mergeParts([part(1, 7, 1, 'A'), part(2, 7, 1, 'B'), part(3, 7, 2, 'C')]
 assert.equal(result.length, 3, 'Ambiguous reference reuse must remain separate');
 assert.equal(mergeParts([part(1, null, 1, 'A'), part(2, null, 2, 'B')]).length, 2);
 assert.equal(mergeParts([]).length, 0);
-console.log('SMS inbox: 12 assertions passed');
+assert.equal(mergeParts([part(1, 7, 1, 'A', {scope: 1}), part(2, 7, 2, 'B', {scope: 2})]).length, 2,
+    'Different SIM scopes must never merge');
+assert.equal(mergeParts([part(1, 7, 1, 'A', {released: true}), part(2, 7, 2, 'B', {released: false})])[0].released, false);
+assert.equal(mergeParts([part(1, 7, 1, 'A', {released: true}), part(2, 7, 2, 'B', {released: true})])[0].released, true);
+console.log('SMS inbox: 15 assertions passed');

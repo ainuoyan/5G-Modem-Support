@@ -20,8 +20,8 @@ function index()
 	entry({"admin", "network", "modem", "sms", "ussd"},template("modem/ussd"),translate("USSD 代码"), 30)
 	entry({"admin", "network", "modem", "sms", "atcommands"},template("modem/atcommands"),translate("AT 命令"), 40)
 	entry({"admin", "network", "modem", "sms", "smsconfig"},cbi("modem/smsconfig"),translate("配置"), 50)
-	entry({"admin", "network", "modem", "sms", "delete_one"}, call("delete_sms", smsindex), nil).leaf = true
-	entry({"admin", "network", "modem", "sms", "delete_all"}, call("delete_all_sms"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "get_inbox"}, call("get_inbox"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "delete_saved"}, post("delete_saved"), nil).leaf = true
 	entry({"admin", "network", "modem", "sms", "run_ussd"}, call("ussd"), nil).leaf = true
 	entry({"admin", "network", "modem", "sms", "run_at"}, call("at"), nil).leaf = true
 	entry({"admin", "network", "modem", "sms", "run_sms"}, call("sms"), nil).leaf = true
@@ -33,17 +33,34 @@ function index()
 end
 
 
-function delete_sms(smsindex)
-local devv = tostring(uci:get("sms_tool", "general", "readport"))
-local s = smsindex
-for d in s:gmatch("%d+") do 
-	os.execute("sms_tool -d " .. devv .. " delete " .. d .. "")
-end
+-- Modified by ainuoyan, 2026-10-10: serve durable SMS without polling the serial port.
+function get_inbox()
+    local inbox = require "luci.model.sms_tool.inbox"
+    local ok, result = pcall(inbox.snapshot)
+    if not ok then
+        http.status(503, "Service Unavailable")
+        result = {ok = false, error = tostring(result):gsub("^.-:%d+: ", "")}
+    end
+    http.header("Cache-Control", "no-store, private")
+    http.prepare_content("application/json")
+    http.write_json(result)
 end
 
-function delete_all_sms()
-	local devv = tostring(uci:get("sms_tool", "general", "readport"))
-	os.execute("sms_tool -d " .. devv .. " delete all")
+function delete_saved()
+    local ids = http.formvalue("ids") or ""
+    if #ids > 8192 or not ids:match("^%d+[,%d]*$") then
+        http.status(400, "Bad Request")
+        http.prepare_content("application/json")
+        http.write_json({ok = false, error = "请选择要删除的本地短信"})
+        return
+    end
+    local output = util.exec("flock -n /var/lock/sms-tool-inbox.lock /usr/bin/lua "
+        .. "/usr/share/sms-tool/inbox-worker.lua delete " .. util.shellquote(ids))
+    local result = require("luci.jsonc").parse(output)
+    if type(result) ~= "table" then result = {ok = false, error = "正在保存新短信，请稍后再试"} end
+    if not result.ok then http.status(409, "Conflict") end
+    http.prepare_content("application/json")
+    http.write_json(result)
 end
 
 function get_ussd()
@@ -65,6 +82,14 @@ function get_pdu()
     end
 end
 
+-- All SMS UI operations share the collector's serial lock.
+local function locked_sms(port, arguments)
+    if not port:match("^/dev/tty[%w_.%-]+$") then return "请先配置有效的短信端口" end
+    local output = util.exec("flock -n " .. util.shellquote("/var/lock/modem-at-" .. port:match("[^/]+$") .. ".lock")
+        .. " sms_tool -d " .. util.shellquote(port) .. arguments .. " 2>&1")
+    return output ~= "" and output or "短信端口正忙或未返回数据，请稍后重试。"
+end
+
 
 function ussd()
     local devv = tostring(uci:get("sms_tool", "general", "ussdport"))
@@ -74,10 +99,7 @@ function ussd()
 
     local ussd_code = http.formvalue("code")
     if ussd_code then
-	    local odpall = io.popen("sms_tool -d " .. devv .. ussd .. pdu .. " ussd " .. ussd_code .." 2>&1")
-	    local odp =  odpall:read("*a")
-	    odpall:close()
-        http.write(tostring(odp))
+        http.write(locked_sms(devv, ussd .. pdu .. " ussd " .. util.shellquote(ussd_code)))
     else
         http.write_json(http.formvalue())
     end
@@ -89,10 +111,7 @@ function at()
 
     local at_code = http.formvalue("code")
     if at_code then
-	    local odpall = io.popen("sms_tool -d " .. devv .. " at "  ..at_code:gsub("[$]", "\\\$"):gsub("\"", "\\\"").." 2>&1")
-	    local odp =  odpall:read("*a")
-	    odpall:close()
-        http.write(tostring(odp))
+        http.write(locked_sms(devv, " at " .. util.shellquote(at_code)))
     else
         http.write_json(http.formvalue())
     end
@@ -103,15 +122,10 @@ function sms()
     local devv = tostring(uci:get("sms_tool", "general", "sendport"))
     local sms_code = http.formvalue("scode")
 
-    nr = (string.sub(sms_code, 1, 20))
-    msgall = string.sub(sms_code, 21)
-    msg = string.gsub(msgall, "\n", " ")
-
     if sms_code then
-	    local odpall = io.popen("sms_tool -d " .. devv .. " send " .. nr .." '".. msg .."'")
-	    local odp =  odpall:read("*a")
-	    odpall:close()
-        http.write(tostring(odp))
+        local nr = string.sub(sms_code, 1, 20):match("^%s*(.-)%s*$")
+        local msg = string.sub(sms_code, 21):gsub("\n", " ")
+        http.write(locked_sms(devv, " send " .. util.shellquote(nr) .. " " .. util.shellquote(msg)))
     else
         http.write_json(http.formvalue())
     end

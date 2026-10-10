@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+/* Modified by ainuoyan, 2026-10-10: allow synthetic original-PDU failure cases. */
 #include <errno.h>
 #include <fcntl.h>
 #include <poll.h>
@@ -12,7 +13,9 @@
 /* A private pseudo terminal, never a physical modem: Chinese UCS2 + GBP. */
 int main(int argc, char **argv)
 {
-    if (argc != 2) return 2;
+    if (argc != 2 && argc != 3) return 2;
+    const char *pdu = argc == 3 ? argv[2] :
+        "0000049121430008620190210000000C4E2D658790018D39FF1A00A3";
     int master = posix_openpt(O_RDWR | O_NOCTTY);
     if (master < 0 || grantpt(master) || unlockpt(master)) return 2;
     char *slave = ptsname(master);
@@ -43,8 +46,7 @@ int main(int argc, char **argv)
                 if (strcmp(command, "AT+CMGF=0") == 0)
                     dprintf(master, "\r\nOK\r\n");
                 if (strcmp(command, "AT+CMGL=4") == 0)
-                    dprintf(master, "\r\n+CMGL: 1,1,,26\r\n"
-                        "0000049121430008620190210000000C4E2D658790018D39FF1A00A3\r\n\r\nOK\r\n");
+                    dprintf(master, "\r\n+CMGL: 1,1,,26\r\n%s\r\n\r\nOK\r\n", pdu);
                 used = 0;
             } else if (used < sizeof(command) - 1) command[used++] = input[i];
         }
