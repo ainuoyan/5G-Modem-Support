@@ -30,7 +30,7 @@ local devv = tostring(uci:get("sms_tool", "general", "readport"))
 
 local smsmem = tostring(uci:get("sms_tool", "general", "storage"))
 
-local statusb = luci.util.exec("sms_tool -s".. smsmem .. " -d ".. devv .. " status")
+local statusb = luci.util.exec("flock /var/lock/modem-at-" .. devv:match("[^/]+$") .. ".lock sms_tool -s".. smsmem .. " -d ".. devv .. " status")
 
 local smsnum = string.sub (statusb, 23, 27)
 
@@ -38,6 +38,8 @@ local smscount = string.match(smsnum, '%d+')
 
 m = Map("sms_tool", translate("配置短信工具"),
 	translate("sms_tool和gui应用程序的配置面板。"))
+
+m:append(Template("modem/sms_navigation"))
 
 s = m:section(NamedSection, 'general' , "sms_tool" , "" .. translate(""))
 s.anonymous = true

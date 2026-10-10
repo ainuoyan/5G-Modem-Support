@@ -1,5 +1,7 @@
 # 中文 | [English](https://github.com/Siriling/5G-Modem-Support/blob/main/EngLish.md)
 
+DJI / Baiwang QDC507 4G 模组的适配说明、验证范围和回归测试见 [QDC507.md](QDC507.md)。
+
 # luci-app-modem
 
 # 目录

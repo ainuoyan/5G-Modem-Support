@@ -10,23 +10,26 @@
 module("luci.controller.modem.sms", package.seeall)
 
 function index()
-	entry({"admin", "modem"}, firstchild(), "Modem", 30).dependent=false
-	entry({"admin", "modem", "sms"}, alias("admin", "modem", "sms", "readsms"), translate("短信"), 20)
-	entry({"admin", "modem", "sms", "readsms"},template("modem/readsms"),translate("收到的信息"), 10)
- 	entry({"admin", "modem", "sms", "sendsms"},template("modem/sendsms"),translate("发送消息"), 20)
- 	entry({"admin", "modem", "sms", "ussd"},template("modem/ussd"),translate("USSD 代码"), 30)
-	entry({"admin", "modem", "sms", "atcommands"},template("modem/atcommands"),translate("AT 命令"), 40)
-	entry({"admin", "modem", "sms", "smsconfig"},cbi("modem/smsconfig"),translate("配置"), 50)
-	entry({"admin", "modem", "sms", "delete_one"}, call("delete_sms", smsindex), nil).leaf = true
-	entry({"admin", "modem", "sms", "delete_all"}, call("delete_all_sms"), nil).leaf = true
-	entry({"admin", "modem", "sms", "run_ussd"}, call("ussd"), nil).leaf = true
-	entry({"admin", "modem", "sms", "run_at"}, call("at"), nil).leaf = true
-	entry({"admin", "modem", "sms", "run_sms"}, call("sms"), nil).leaf = true
-	entry({"admin", "modem", "sms", "readsim"}, call("slots"), nil).leaf = true
-	entry({"admin", "modem", "sms", "countsms"}, call("count_sms"), nil).leaf = true
-	entry({"admin", "modem", "sms", "user_ussd"}, call("userussd"), nil).leaf = true
-	entry({"admin", "modem", "sms", "user_atc"}, call("useratc"), nil).leaf = true
-	entry({"admin", "modem", "sms", "user_phonebook"}, call("userphb"), nil).leaf = true
+	if not fs.access("/etc/config/modem") then
+		entry({"admin", "network", "modem"}, firstchild(), translate("Modem"), 100).dependent = false
+	end
+
+	entry({"admin", "network", "modem", "sms"}, alias("admin", "network", "modem", "sms", "readsms"), translate("短信"), 60)
+	entry({"admin", "network", "modem", "sms", "readsms"},template("modem/readsms"),translate("收到的信息"), 10)
+	entry({"admin", "network", "modem", "sms", "sendsms"},template("modem/sendsms"),translate("发送短信"), 20)
+	entry({"admin", "network", "modem", "sms", "ussd"},template("modem/ussd"),translate("USSD 代码"), 30)
+	entry({"admin", "network", "modem", "sms", "atcommands"},template("modem/atcommands"),translate("AT 命令"), 40)
+	entry({"admin", "network", "modem", "sms", "smsconfig"},cbi("modem/smsconfig"),translate("配置"), 50)
+	entry({"admin", "network", "modem", "sms", "delete_one"}, call("delete_sms", smsindex), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "delete_all"}, call("delete_all_sms"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "run_ussd"}, call("ussd"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "run_at"}, call("at"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "run_sms"}, call("sms"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "readsim"}, call("slots"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "countsms"}, call("count_sms"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "user_ussd"}, call("userussd"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "user_atc"}, call("useratc"), nil).leaf = true
+	entry({"admin", "network", "modem", "sms", "user_phonebook"}, call("userphb"), nil).leaf = true
 end
 
 
@@ -124,7 +127,7 @@ function slots()
 
 	local smsmem = tostring(uci:get("sms_tool", "general", "storage"))
 
-	local statusb = luci.util.exec("sms_tool -s" .. smsmem .. " -d ".. devv .. " status")
+	local statusb = luci.util.exec("flock /var/lock/modem-at-" .. devv:match("[^/]+$") .. ".lock sms_tool -s" .. smsmem .. " -d ".. devv .. " status")
 	local usex = string.sub (statusb, 23, 27)
 	local max = statusb:match('[^: ]+$')
 	sim["use"] = string.match(usex, '%d+')
@@ -152,7 +155,7 @@ function count_sms()
 
 	 local smsmem = tostring(uci:get("sms_tool", "general", "storage"))
 
-        local statusb = luci.util.exec("sms_tool -s" .. smsmem .. " -d ".. devv .. " status")
+        local statusb = luci.util.exec("flock /var/lock/modem-at-" .. devv:match("[^/]+$") .. ".lock sms_tool -s" .. smsmem .. " -d ".. devv .. " status")
         local smsnum = string.sub (statusb, 23, 27)
         local smscount = string.match(smsnum, '%d+')
         os.execute("echo " .. smscount .. " > /etc/config/sms_count")

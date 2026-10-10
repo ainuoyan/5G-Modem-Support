@@ -25,7 +25,7 @@ LUCI_DEPENDS:=+luci-compat \
 		+quectel-cm \
 		+sms-tool \
 		+ndisc6 +rdisc6 \
-		+bc +jq
+		+bc +jq +flock
 
 define Package/luci-app-modem/conffiles
 /etc/config/modem

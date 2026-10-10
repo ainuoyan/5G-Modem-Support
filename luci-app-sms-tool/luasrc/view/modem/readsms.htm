@@ -8,11 +8,12 @@
 
 	local devv = tostring(uci:get("sms_tool", "general", "readport"))
 	local smsmem = tostring(uci:get("sms_tool", "general", "storage"))
-	local sms = tostring(luci.sys.exec("sms_tool -s" .. smsmem .. " -d " .. devv .. " -f '%Y-%m-%d %H:%M' -j recv 2>/dev/null"))
+	local sms = tostring(luci.sys.exec("flock /var/lock/modem-at-" .. devv:match("[^/]+$") .. ".lock sms_tool -s" .. smsmem .. " -d " .. devv .. " -f '%Y-%m-%d %H:%M' -j recv 2>/dev/null"))
 	local smsmer = tostring(uci:get("sms_tool", "general", "mergesms"))
-	local smscuta = string.sub (sms, 8)
-	local smscut = smscuta:sub(1, #smscuta - 2)
-	local statusb = luci.util.exec("sms_tool -s" .. smsmem .. " -d ".. devv .. " status")
+	local json = require "luci.jsonc"
+	local inbox = json.parse(sms) or {}
+	local smscut = json.stringify(inbox.sms or inbox.msg or {}):gsub("<", "\\u003c"):gsub(">", "\\u003e"):gsub("&", "\\u0026")
+	local statusb = luci.util.exec("flock /var/lock/modem-at-" .. devv:match("[^/]+$") .. ".lock sms_tool -s" .. smsmem .. " -d ".. devv .. " status")
 	local all = statusb:match('[^: ]+$')
 	local location = ""
 	local l = string.sub (statusb, 15, 16)
@@ -25,6 +26,7 @@
 -%>
 	
 <%+header%>
+<%+modem/sms_navigation%>
 
 <!--
 -- Copyright 2020-2022 Rafał Wabik (IceG) - From eko.one.pl forum
@@ -57,11 +59,13 @@ tr:nth-child(odd) {background-color: var(--background-color-medium)}
 
 </style>
 
+<script src="<%=resource%>/sms-tool-inbox.js"></script>
+
 <script type="text/javascript">//<![CDATA[
 
 	window.onload = function readSMS() {
 
-			XHR.get('<%=luci.dispatcher.build_url("admin", "modem", "sms", "readsim")%>', null,
+			XHR.get('<%=luci.dispatcher.build_url("admin", "network", "modem", "sms", "readsim")%>', null,
 			function(x, sim)
 			{
 			var vn = parseInt(sim.use) || 0;
@@ -80,6 +84,8 @@ tr:nth-child(odd) {background-color: var(--background-color-medium)}
 			var data = JSON.stringify(sortedData);
 			var json = JSON.parse(data);
 
+			document.getElementById('smsMergeStatus').textContent =
+                '显示 ' + json.length + ' 条短信（SIM 中存储 ' + array.length + ' 个分段）';
 			var x = <%=all%>;
         		for (var d = 0; d < json.length; d++) {
 
@@ -89,9 +95,11 @@ tr:nth-child(odd) {background-color: var(--background-color-medium)}
   						var cell3 = row.insertCell(0);
   						var cell4 = row.insertCell(0);
 						cell4.innerHTML = "<input type='checkbox' name='smsn' id="+"btn"+json[d].index+" /><img src='<%=resource%>/icons/delsms.png'>"
- 				 		cell3.innerHTML = json[d].sender;
-  						cell2.innerHTML = json[d].timestamp;
-    						cell1.innerHTML = json[d].content;	
+						cell3.textContent = json[d].sender;
+						cell2.textContent = json[d].timestamp;
+						cell1.style.whiteSpace = 'pre-wrap';
+						cell1.textContent = (json[d].missing_parts && json[d].missing_parts.length
+                            ? '（长短信未收全：' + json[d].received_parts + '/' + json[d].total + ' 段）\n' : '') + json[d].content;
 				}
 			}
 
@@ -101,39 +109,13 @@ tr:nth-child(odd) {background-color: var(--background-color-medium)}
 			var sortedData = array .sort((function (a, b) { return new Date(b.timestamp) - new Date(a.timestamp) }));
 			var table = document.getElementById("smsTable");
 
-			var MergeMySMS = sortedData;
-    			result = [];
-
-			MergeMySMS.forEach(function (o) {
-    			if (!this[o.sender]) {
-    			if(o.part > 0){
-        		this[o.sender] = { index: o.index, sender: o.sender, timestamp: o.timestamp, part: o.part, total: o.total, content: o.content, contentparts: [] };
-        		this[o.sender].contentparts[o.part] = o.content;
-        		}else{
-        		this[o.sender] = { index: o.index, sender: o.sender, timestamp: o.timestamp, part: o.part, total: o.total, content: o.content};
-        		}
-        		result.push(this[o.sender]);
-        		return;
-    			}
-			if (this[o.sender].total == o.total && this[o.sender].timestamp == o.timestamp && this[o.sender].sender == o.sender && this[o.sender].part > 0) {
-    			this[o.sender].index += '-' + o.index;
-            		this[o.sender].contentparts[o.part] = o.content;}
-			else {
-			this[o.sender] = { index: o.index, sender: o.sender, timestamp: o.timestamp, part: o.part, total: o.total, content: o.content };
-        		result.push(this[o.sender]);
-        		return;
-			}
-			}, Object.create(null));
-			result.forEach(function(o) {
-                		if(o.contentparts){
-                    		o.contentparts.shift();
-                    		o.content = o.contentparts.join('');
-                		}
-			});
+			var result = SMSInbox.mergeParts(sortedData);
 
 			var data = JSON.stringify(result);
 			var json = JSON.parse(data);
 
+			document.getElementById('smsMergeStatus').textContent =
+                '显示 ' + json.length + ' 条短信（SIM 中存储 ' + array.length + ' 个分段）';
 			var x = <%=all%>;
         		for (var d = 0; d < json.length; d++) {
 
@@ -143,9 +125,11 @@ tr:nth-child(odd) {background-color: var(--background-color-medium)}
   						var cell3 = row.insertCell(0);
   						var cell4 = row.insertCell(0);
 						cell4.innerHTML = "<input type='checkbox' name='smsn' id="+"btn"+json[d].index+" /><img src='<%=resource%>/icons/delsms.png'>"
- 				 		cell3.innerHTML = json[d].sender;
-  						cell2.innerHTML = json[d].timestamp;
-    						cell1.innerHTML = json[d].content;
+						cell3.textContent = json[d].sender;
+						cell2.textContent = json[d].timestamp;
+						cell1.style.whiteSpace = 'pre-wrap';
+						cell1.textContent = (json[d].missing_parts && json[d].missing_parts.length
+                            ? '（长短信未收全：' + json[d].received_parts + '/' + json[d].total + ' 段）\n' : '') + json[d].content;
 				}
 			}
 	}
@@ -174,7 +158,7 @@ if (document.querySelectorAll('input[name="smsn"]:checked').length === document.
 		for (var i = rowCount - 1; i > 0; i--) {
             		smsTable.deleteRow(i);}
 
-		XHR.get('<%=luci.dispatcher.build_url("admin", "modem", "sms", "delete_all")%>/' , null,
+		XHR.get('<%=luci.dispatcher.build_url("admin", "network", "modem", "sms", "delete_all")%>/' , null,
 
 			function()
 			{
@@ -182,7 +166,7 @@ if (document.querySelectorAll('input[name="smsn"]:checked').length === document.
 			}
 		);
 
-		XHR.get('<%=luci.dispatcher.build_url("admin", "modem", "sms", "countsms")%>/' , null,
+		XHR.get('<%=luci.dispatcher.build_url("admin", "network", "modem", "sms", "countsms")%>/' , null,
 
 			function()
 			{
@@ -207,7 +191,7 @@ if (document.querySelectorAll('input[name="smsn"]:checked').length === document.
 
 	if (confirm("<%:Delete selected message(s)?%>")) {
 
-		XHR.get('<%=luci.dispatcher.build_url("admin", "modem", "sms", "delete_one")%>/' + smsindex, null,
+		XHR.get('<%=luci.dispatcher.build_url("admin", "network", "modem", "sms", "delete_one")%>/' + smsindex, null,
 
 			function()
 			{
@@ -224,7 +208,7 @@ if (document.querySelectorAll('input[name="smsn"]:checked').length === document.
   			}
         		}
 
-		XHR.get('<%=luci.dispatcher.build_url("admin", "modem", "sms", "readsim")%>', null,
+		XHR.get('<%=luci.dispatcher.build_url("admin", "network", "modem", "sms", "readsim")%>', null,
 			function(x, sim)
 			{
 			var vn = parseInt(sim.use) || 0;
@@ -238,7 +222,7 @@ if (document.querySelectorAll('input[name="smsn"]:checked').length === document.
 
 		);
 
-		XHR.get('<%=luci.dispatcher.build_url("admin", "modem", "sms", "countsms")%>/' , null,
+		XHR.get('<%=luci.dispatcher.build_url("admin", "network", "modem", "sms", "countsms")%>/' , null,
 
 			function()
 			{
@@ -261,6 +245,7 @@ if (document.querySelectorAll('input[name="smsn"]:checked').length === document.
 	<div class="tr"><div class="td left" width="33%"><%:信息 (收件箱 / 最大值)%>:</div><div class="td left" id="usse"></div></div>
 	</div>
 
+	<p id="smsMergeStatus"></p>
 	<table id="smsTable" width="100%" class="table">
   	<tr class="tr cbi-rowstyle-2">
 
